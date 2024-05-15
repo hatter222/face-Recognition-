@@ -1,14 +1,15 @@
 import face_recognition
 import os
 import cv2
-
-# import requests
+import pyttsx3
 import numpy as np
+import queue
+import threading
 
-cap = cv2.VideoCapture("Raza_sajal.mp4")
+cap = cv2.VideoCapture(0)
 
 Face_IDs = "Face_IDs"
-TOLERANCE = 0.6
+TOLERANCE = 0.4
 FRAME_THICKNESS = 3
 FONT_THICKNESS = 2
 # default: 'hog', other one can be 'cnn' - CUDA accelerated (if available) deep-learning pretrained model
@@ -23,56 +24,17 @@ def name_to_color(name):
     return color
 
 
-print("Loading known faces...")
-known_faces = []
-known_names = []
-print(Face_IDs)
-# We oranize known faces as subfolders of KNOWN_FACES_DIR
-# Each subfolder's name becomes our label (name)
-for name in os.listdir(Face_IDs):
+def recognize_and_announce(frame, known_faces, known_names, q):
+    locations = face_recognition.face_locations(frame)
+    # print(locations)
 
-    # Next we load every file of faces of known person
-    for filename in os.listdir(f"{Face_IDs}/{name}"):
-
-        # Load an image
-        # image = face_recognition.load_image_file(f"{Face_IDs}/{name}/{filename}")
-        image = cv2.imread(f"{Face_IDs}/{name}/{filename}")
-        print(image.shape)
-        # Get 128-dimension face encoding
-        # Always returns a list of found faces, for this purpose we take first face only (assuming one face per image as you can't be twice on one image)
-        encoding = face_recognition.face_encodings(image)[0]
-
-        # Append encodings and name
-        known_faces.append(encoding)
-        known_names.append(name)
-
-
-print("Processing unknown faces...")
-# Now let's loop over a folder of faces we want to label
-# cap= cv2.VideoCapture(0)
-while True:
-    ret, frame = cap.read()
-    if ret is False:
-        break
-    # img_resp = requests.get(url, verify=False)
-    # imag_arry = np.array(bytearray(img_resp.content), dtype = np.uint8)
-    # frame  = cv2.imdecode(imag_arry, -1)
-
-    # Load image
-    # print(f'Filename {filename}', end='')
-    # frame = face_recognition.load_image_file(frame)
-    # ////////////////////////////////////
-    # This time we first grab face locations - we'll need them to draw boxes
-    locations = face_recognition.face_locations(frame, model=MODEL)
-    print(locations)
-
-    # Now since we know loctions, we can pass them to face_encodings as second argument
+    # Now since we know locations, we can pass them to face_encodings as second argument
     # Without that it will search for faces once again slowing down whole process
     encodings = face_recognition.face_encodings(frame, locations)
 
     # We passed our image through face_locations and face_encodings, so we can modify it
     # First we need to convert it from RGB to BGR as we are going to work with cv2
-    # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     # But this time we assume that there might be more faces in an image - we can find faces of dirrerent people
     # print(f', found {len(encodings)} face(s)')
@@ -89,8 +51,11 @@ while True:
             True in results
         ):  # If at least one is true, get a name of first of found labels
             match = known_names[results.index(True)]
-            print(f" - {match} from {results}")
-
+            # print(f" - {match} from {results}")
+            q.put(match)
+            last = match
+            print(match)
+            print(results)
             # Each location contains positions in order: top, right, bottom, left
             top_left = (face_location[3], face_location[0])
             bottom_right = (face_location[1], face_location[2])
@@ -119,10 +84,62 @@ while True:
                 (200, 200, 200),
                 FONT_THICKNESS,
             )
+        else:
+            print(q.get())
 
+
+# Function to speak names from the queue
+def speak_from_queue(q, engine):
+    while True:
+        name = q.get()
+        print(name)  # Wait for a name in the queue
+        engine.say(name)
+        engine.runAndWait()
+        q.task_done()  # Signal task completion for queue management
+
+
+print("Loading known faces...")
+known_faces = []
+known_names = []
+print(Face_IDs)
+# We organize known faces as subfolder of KNOWN_FACES_DIR
+# Each subfolder's name becomes our label (name)
+for name in os.listdir(Face_IDs):
+
+    # Next we load every file of faces of known person
+    for filename in os.listdir(f"{Face_IDs}/{name}"):
+
+        # Load an image
+        # image = face_recognition.load_image_file(f"{Face_IDs}/{name}/{filename}")
+        image = cv2.imread(f"{Face_IDs}/{name}/{filename}")
+        print(image.shape)
+        # Get 128-dimension face encoding
+        # Always returns a list of found faces, for this purpose we take first face only (assuming one face per image as you can't be twice on one image)
+        encoding = face_recognition.face_encodings(image)[0]
+
+        # Append encodings and name
+        known_faces.append(encoding)
+        known_names.append(name)
+
+print("Processing unknown faces...")
+# Initialize the TTS engine
+engine = pyttsx3.init()
+
+# Create a queue for names
+q = queue.Queue()
+
+# Start the speech thread
+speech_thread = threading.Thread(target=speak_from_queue, args=(q, engine))
+speech_thread.daemon = True  # Set thread as daemon for graceful termination
+speech_thread.start()
+while True:
+    ret, frame = cap.read()
+    if ret is False:
+        break
+    recognize_and_announce(frame, known_faces, known_names, q)
     # Show image
-    cv2.namedWindow("filename", cv2.WINDOW_FREERATIO)
     cv2.imshow("filename", frame)
+    # cv2.namedWindow("filename", cv2.WINDOW_FREERATIO)
     if cv2.waitKey(1) == ord("q"):
         break
 cv2.destroyAllWindows()
