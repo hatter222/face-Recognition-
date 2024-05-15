@@ -5,6 +5,9 @@ import pyttsx3
 import numpy as np
 import queue
 import threading
+import collections
+
+last_name = collections.deque(maxlen=3)
 
 cap = cv2.VideoCapture(0)
 
@@ -47,15 +50,20 @@ def recognize_and_announce(frame, known_faces, known_names, q):
         # Since order is being preserved, we check if any face was found then grab index
         # then label (name) of first matching known face withing a tolerance
         match = None
+        # check = q.get_nowait()
         if (
             True in results
         ):  # If at least one is true, get a name of first of found labels
             match = known_names[results.index(True)]
             # print(f" - {match} from {results}")
+            # if check != match:
+            # last_name.appendleft(match)
+            # last_name[1]
             q.put(match)
-            last = match
-            print(match)
-            print(results)
+            # else:
+            # print("same match")
+            # print(q.get())
+            # print(results)
             # Each location contains positions in order: top, right, bottom, left
             top_left = (face_location[3], face_location[0])
             bottom_right = (face_location[1], face_location[2])
@@ -84,15 +92,12 @@ def recognize_and_announce(frame, known_faces, known_names, q):
                 (200, 200, 200),
                 FONT_THICKNESS,
             )
-        else:
-            print(q.get())
 
 
 # Function to speak names from the queue
 def speak_from_queue(q, engine):
     while True:
-        name = q.get()
-        print(name)  # Wait for a name in the queue
+        name = q.get()  # Wait for a name in the queue
         engine.say(name)
         engine.runAndWait()
         q.task_done()  # Signal task completion for queue management
@@ -126,8 +131,8 @@ print("Processing unknown faces...")
 engine = pyttsx3.init()
 
 # Create a queue for names
-q = queue.Queue()
-
+q = queue.Queue(maxsize=2)
+# q.put("None")
 # Start the speech thread
 speech_thread = threading.Thread(target=speak_from_queue, args=(q, engine))
 speech_thread.daemon = True  # Set thread as daemon for graceful termination
